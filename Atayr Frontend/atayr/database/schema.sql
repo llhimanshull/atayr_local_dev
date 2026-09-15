@@ -16,8 +16,12 @@ CREATE TABLE public.garments (
     fit TEXT,
     studio_image_path TEXT NOT NULL,
     source_image_path TEXT,
+    embedding vector(768),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Create HNSW index for duplicate matching
+CREATE INDEX ON public.garments USING hnsw (embedding vector_cosine_ops);
 
 -- 2. Enable Row Level Security
 ALTER TABLE public.garments ENABLE ROW LEVEL SECURITY;
@@ -83,3 +87,16 @@ CREATE POLICY "Users can delete their own wardrobe files"
 ON storage.objects FOR DELETE 
 TO authenticated 
 USING (bucket_id = 'wardrobe' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Add observation table schema to match actual DB
+CREATE TABLE public.garment_observations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    garment_id UUID REFERENCES public.garments(id) ON DELETE CASCADE,
+    source_image_path TEXT,
+    embedding vector(768),
+    detected_attributes JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create HNSW index for duplicate matching
+CREATE INDEX ON public.garment_observations USING hnsw (embedding vector_cosine_ops);

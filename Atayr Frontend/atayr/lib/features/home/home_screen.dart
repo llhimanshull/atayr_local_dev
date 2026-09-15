@@ -7,6 +7,8 @@ import '../../core/theme/atayr_colors.dart';
 import '../wardrobe/wardrobe_service.dart';
 import '../wardrobe/models/garment_model.dart';
 import '../extraction/jobs_status_screen.dart';
+import '../extraction/extraction_service.dart';
+import '../extraction/models/processing_job_models.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,7 +19,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final WardrobeService _wardrobeService = WardrobeService();
+  final ExtractionService _extractionService = ExtractionService();
   List<Garment> _recentGarments = [];
+  List<ProcessingJobItem> _actionItems = [];
   bool _isLoading = true;
 
   @override
@@ -27,12 +31,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+    });
+    
     try {
       final rawData = await _wardrobeService.getGarments();
       final garments = rawData.map((json) => Garment.fromJson(json)).toList();
+      
+      final actionItems = await _extractionService.getItemsRequiringAction();
+      
       if (mounted) {
         setState(() {
           _recentGarments = garments.take(4).toList();
+          _actionItems = actionItems;
           _isLoading = false;
         });
       }
@@ -79,12 +92,65 @@ class _HomeScreenState extends State<HomeScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(builder: (context) => const JobsStatusScreen()),
-                          );
+                          ).then((_) => _loadData());
                         },
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
+                  
+                  // Action Required Banner
+                  if (_actionItems.isNotEmpty) ...[
+                    GestureDetector(
+                      onTap: () {
+                        // Navigate to PersonSelectionScreen for the first item requiring action
+                        Navigator.pushNamed(
+                          context, 
+                          '/person_selection', 
+                          arguments: _actionItems.first,
+                        ).then((_) => _loadData());
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.deepOrange,
+                          border: Border.all(color: AtayrColors.ink, width: 2),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: AtayrColors.ink,
+                              offset: Offset(4, 4),
+                            )
+                          ],
+                        ),
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'ACTION REQUIRED',
+                                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${_actionItems.length} photo(s) need your attention.',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.touch_app, color: Colors.white, size: 32),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   
                   // 2. Scan clothes that match your wardrobe (Placeholder)
                   GestureDetector(

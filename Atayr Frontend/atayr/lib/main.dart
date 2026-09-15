@@ -8,6 +8,8 @@ import 'services/api_service.dart';
 import 'services/garment_repository.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/auth/root_screen.dart';
+import 'features/extraction/person_selection_screen.dart';
+import 'features/extraction/models/processing_job_models.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +48,15 @@ class AtayrApp extends StatelessWidget {
       darkTheme: AppTheme.darkTheme,
       // RootScreen handles checking the session and routing to Home or Auth
       home: const RootScreen(),
+      onGenerateRoute: (settings) {
+        if (settings.name == '/person_selection') {
+          final item = settings.arguments as ProcessingJobItem;
+          return MaterialPageRoute(
+            builder: (context) => PersonSelectionScreen(item: item),
+          );
+        }
+        return null;
+      },
     );
   }
 }

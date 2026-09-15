@@ -51,3 +51,58 @@ class SupabaseJobService:
     def get_job(self, job_id: str):
         response = self.supabase.table("processing_jobs").select("*").eq("id", job_id).execute()
         return response.data[0] if response.data else None
+
+    def insert_garment(self, garment_data: dict):
+        embedding = garment_data.get('embedding')
+        print(f"[EMBEDDING WRITE] garment_id={garment_data.get('id')} embedding_present={bool(embedding)} dims={len(embedding) if embedding else 0}")
+        return self.supabase.table("garments").insert(garment_data).execute()
+
+    def insert_garment_observation(self, observation_data: dict):
+        embedding = observation_data.get('embedding')
+        print(f"[EMBEDDING WRITE] garment_id={observation_data.get('garment_id')} embedding_present={bool(embedding)} dims={len(embedding) if embedding else 0}")
+        return self.supabase.table("garment_observations").insert(observation_data).execute()
+
+    def get_garments_by_ids(self, garment_ids: list[str]):
+        if not garment_ids:
+            return []
+        response = self.supabase.table("garments").select("*").in_("id", garment_ids).execute()
+        return response.data
+
+    def match_garment_observation(self, user_id: str, category: str, embedding: list[float], threshold: float = 0.05):
+        """
+        Calls the RPC match_garment_observation to find candidate garments.
+        Returns a list of dicts with 'garment_id' and 'similarity'.
+        """
+        response = self.supabase.rpc(
+            "match_garment_observation",
+            {
+                "p_user_id": user_id,
+                "p_category": category,
+                "p_embedding": embedding,
+                "p_match_threshold": threshold
+            }
+        ).execute()
+        return response.data if response.data else []
+
+    def claim_job_item(self, item_id: str) -> bool:
+        """
+        Atomically claims a job item by changing its status from 'queued' to 'analyzing'.
+        Returns True if successful, False if it was already claimed.
+        """
+        response = self.supabase.table("processing_job_items") \
+            .update({"status": "analyzing", "progress": 0.1}) \
+            .eq("id", item_id) \
+            .eq("status", "queued") \
+            .execute()
+        return len(response.data) > 0
+
+    def claim_paused_job_item(self, item_id: str) -> bool:
+        """
+        Atomically claims a paused job item by changing its status to 'generating'.
+        """
+        response = self.supabase.table("processing_job_items") \
+            .update({"status": "generating", "progress": 0.5}) \
+            .eq("id", item_id) \
+            .eq("status", "paused") \
+            .execute()
+        return len(response.data) > 0

@@ -86,20 +86,41 @@ class ExtractedItem {
   };
 }
 
+class Person {
+  final String id;
+  final BoundingBox boundingBox;
+  final List<ExtractedItem> garments;
+
+  Person({
+    required this.id,
+    required this.boundingBox,
+    required this.garments,
+  });
+
+  factory Person.fromJson(Map<String, dynamic> json) {
+    var garmentsList = json['garments'] as List? ?? [];
+    return Person(
+      id: json['id'],
+      boundingBox: BoundingBox.fromJson(json['bounding_box']),
+      garments: garmentsList.map((g) => ExtractedItem.fromJson(g)).toList(),
+    );
+  }
+}
+
 class AnalysisResponse {
   final String sourceImageId;
-  final List<ExtractedItem> items;
+  final List<Person> people;
 
   AnalysisResponse({
     required this.sourceImageId,
-    required this.items,
+    required this.people,
   });
 
   factory AnalysisResponse.fromJson(Map<String, dynamic> json) {
-    var itemsList = json['items'] as List? ?? [];
+    var peopleList = json['people'] as List? ?? [];
     return AnalysisResponse(
       sourceImageId: json['source_image_id'] ?? '',
-      items: itemsList.map((i) => ExtractedItem.fromJson(i)).toList(),
+      people: peopleList.map((p) => Person.fromJson(p)).toList(),
     );
   }
 }
@@ -155,4 +176,16 @@ class GenerationResponse {
       results: resultsList.map((r) => GeneratedGarment.fromJson(r)).toList(),
     );
   }
+}
+
+class BatchResult {
+  final String? jobId;
+  final int totalSubmitted;
+  final int duplicatesSkipped;
+
+  BatchResult({
+    this.jobId,
+    required this.totalSubmitted,
+    required this.duplicatesSkipped,
+  });
 }

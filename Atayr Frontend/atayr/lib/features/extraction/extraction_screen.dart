@@ -51,7 +51,7 @@ class _ExtractionScreenState extends State<ExtractionScreen> {
     });
 
     try {
-      await _extractionService.submitBatch(_selectedImages);
+      final result = await _extractionService.submitBatch(_selectedImages);
 
       if (!mounted) return;
       setState(() {
@@ -59,9 +59,18 @@ class _ExtractionScreenState extends State<ExtractionScreen> {
         _selectedImages.clear();
       });
 
+      String message = 'BATCH SUBMITTED SUCCESSFULLY!';
+      if (result.duplicatesSkipped > 0) {
+        if (result.totalSubmitted == result.duplicatesSkipped) {
+          message = 'ALL ${result.duplicatesSkipped} PHOTOS WERE DUPLICATES AND SKIPPED.';
+        } else {
+          message = 'BATCH SUBMITTED! (${result.duplicatesSkipped} DUPLICATES SKIPPED)';
+        }
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('BATCH SUBMITTED SUCCESSFULLY!'),
+        SnackBar(
+          content: Text(message),
           backgroundColor: Colors.green,
         ),
       );

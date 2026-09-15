@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+import 'package:crypto/crypto.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/config/app_config.dart';
 import '../wardrobe/wardrobe_service.dart';
@@ -73,9 +74,14 @@ class ExtractionService {
     ));
     
     // Convert AnalysisResponse back to JSON string that the backend expects
+    // For single flow, we just take the first person's garments
+    final itemsList = analysisResult.people.isNotEmpty 
+        ? analysisResult.people.first.garments.map((g) => g.toJson()).toList() 
+        : [];
+        
     final analysisJsonString = jsonEncode({
       'source_image_id': analysisResult.sourceImageId,
-      'items': analysisResult.items.map((i) => i.toJson()).toList(),
+      'items': itemsList,
     });
     
     request.fields['analysis_result'] = analysisJsonString;
@@ -209,6 +215,27 @@ class ExtractionService {
     }
   }
 
+  /// Fetch all items requiring user action.
+  Future<List<ProcessingJobItem>> getItemsRequiringAction() async {
+    final userId = _wardrobeService.currentUserId;
+    if (userId == null) return [];
+    
+    try {
+      final response = await _supabase
+          .from('processing_job_items')
+          .select()
+          .eq('user_id', userId)
+          .eq('status', 'requires_action')
+          .order('created_at', ascending: true);
+
+      return (response as List)
+          .map((json) => ProcessingJobItem.fromJson(json))
+          .toList();
+    } catch (e) {
+      throw ExtractionException('Failed to load items requiring action: $e');
+    }
+  }
+
   /// Create a new job in the database.
   Future<ProcessingJob> createJob(int totalItems) async {
     final userId = _wardrobeService.currentUserId;
@@ -231,18 +258,68 @@ class ExtractionService {
   }
 
   /// Submit a batch of images for asynchronous processing
-  Future<String> submitBatch(List<XFile> images) async {
+  Future<BatchResult> submitBatch(List<XFile> images) async {
     final userId = _wardrobeService.currentUserId;
     if (userId == null) {
       throw ExtractionException('User not authenticated.');
     }
 
-    // 1. Create Job
-    final job = await createJob(images.length);
+    int duplicatesSkipped = 0;
+    List<XFile> uniqueImages = [];
+    List<String> uniqueHashes = [];
+    Set<String> localHashes = {};
+
+    // 1. Filter duplicates locally and against DB
+    for (var image in images) {
+      final imageBytes = await image.readAsBytes();
+      final digest = sha256.convert(imageBytes);
+      final hashStr = digest.toString();
+
+      // Check intra-batch duplicate
+      if (localHashes.contains(hashStr)) {
+        duplicatesSkipped++;
+        continue;
+      }
+      localHashes.add(hashStr);
+
+      // Check DB duplicate
+      try {
+        final existing = await _supabase
+            .from('source_photos')
+            .select()
+            .eq('user_id', userId)
+            .eq('sha256_hash', hashStr)
+            .maybeSingle();
+            
+        if (existing != null) {
+          duplicatesSkipped++;
+          continue;
+        }
+      } catch (e) {
+        // Query failed, assume it's new
+      }
+      
+      uniqueImages.add(image);
+      uniqueHashes.add(hashStr);
+    }
+
+    if (uniqueImages.isEmpty) {
+      return BatchResult(
+        jobId: null,
+        totalSubmitted: images.length,
+        duplicatesSkipped: duplicatesSkipped,
+      );
+    }
+
+    // 2. Create Job
+    final job = await createJob(uniqueImages.length);
     final jobId = job.id;
 
-    // 2. Upload images and create job items
-    for (var image in images) {
+    // 3. Upload images and create job items
+    for (int i = 0; i < uniqueImages.length; i++) {
+      final image = uniqueImages[i];
+      final hashStr = uniqueHashes[i];
+      
       final sourceId = _uuid.v4();
       final sourceImagePath = '$userId/sources/$sourceId.jpg';
       final itemId = _uuid.v4();
@@ -250,6 +327,17 @@ class ExtractionService {
       try {
         final imageBytes = await image.readAsBytes();
         await _wardrobeService.uploadSourceImage(imageBytes, sourceId);
+        
+        // Save to source_photos to prevent future duplicates
+        try {
+          await _supabase.from('source_photos').insert({
+            'user_id': userId,
+            'storage_path': sourceImagePath,
+            'sha256_hash': hashStr,
+          });
+        } catch (e) {
+          // It's possible another job inserted it concurrently, ignore duplicate error
+        }
         
         await _supabase.from('processing_job_items').insert({
           'id': itemId,
@@ -270,7 +358,7 @@ class ExtractionService {
       }
     }
 
-    // 3. Trigger backend background processing
+    // 4. Trigger backend background processing
     final uri = Uri.parse('$baseUrl/process-job/$jobId');
     try {
       final response = await http.post(uri).timeout(const Duration(seconds: 10));
@@ -281,6 +369,24 @@ class ExtractionService {
       // print('Warning: Failed to trigger backend processing: $e');
     }
 
-    return jobId;
+    return BatchResult(
+      jobId: jobId,
+      totalSubmitted: images.length,
+      duplicatesSkipped: duplicatesSkipped,
+    );
+  }
+
+  /// Resume a paused job item with the selected person
+  Future<void> resumeJobItem(String itemId, String personId) async {
+    final uri = Uri.parse('$baseUrl/process-job-item/$itemId/resume?person_id=$personId');
+    try {
+      final response = await http.post(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200 && response.statusCode != 202) {
+        throw ExtractionException('Failed to resume item: ${response.statusCode}');
+      }
+    } catch (e) {
+      if (e is ExtractionException) rethrow;
+      throw ExtractionException('Network error during resume: $e');
+    }
   }
 }

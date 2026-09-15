@@ -20,5 +20,10 @@ class Item(BaseModel):
     visibility: float
     bounding_box: BoundingBox
 
+class Person(BaseModel):
+    id: str
+    bounding_box: BoundingBox
+    garments: List[Item]
+
 class AnalysisResponse(BaseModel):
-    items: List[Item]
+    people: List[Person]

@@ -67,6 +67,7 @@ class ProcessingJobItem {
   final String status;
   final String? errorMessage;
   final double progress;
+  final Map<String, dynamic>? analysisData;
   final DateTime? startedAt;
   final DateTime? completedAt;
   final DateTime createdAt;
@@ -79,7 +80,8 @@ class ProcessingJobItem {
     this.sourceImagePath,
     required this.status,
     this.errorMessage,
-    this.progress = 0.0,
+    required this.progress,
+    this.analysisData,
     this.startedAt,
     this.completedAt,
     required this.createdAt,
@@ -94,7 +96,8 @@ class ProcessingJobItem {
       sourceImagePath: json['source_image_path'],
       status: json['status'] ?? 'queued',
       errorMessage: json['error_message'],
-      progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+      progress: (json['progress'] ?? 0.0).toDouble(),
+      analysisData: json['analysis_data'],
       startedAt: json['started_at'] != null ? DateTime.parse(json['started_at']) : null,
       completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at']) : null,
       createdAt: DateTime.parse(json['created_at']),

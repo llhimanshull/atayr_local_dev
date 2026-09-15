@@ -190,29 +190,9 @@ async def generate(
 
 from fastapi import BackgroundTasks
 from services.supabase_job_service import SupabaseJobService
-from services.analyzer import embed_garment
-import asyncio
-import uuid
 
-# --- DEDUPLICATION CONSTANTS ---
-# Using distance where 0.0 is identical. 
-# We require distance <= 0.15 (similarity >= 0.85) to confidently merge garments.
-CONFIDENT_MATCH_DISTANCE_THRESHOLD = 0.15
+supabase_job_service = SupabaseJobService()
 
-# Categories that can safely be matched against each other
-CATEGORY_FAMILIES = {
-    'eyewear': ['glasses', 'sunglasses', 'eyewear'],
-    'glasses': ['glasses', 'sunglasses', 'eyewear'],
-    'sunglasses': ['glasses', 'sunglasses', 'eyewear'],
-    'bag': ['bag', 'handbag', 'purse', 'backpack', 'accessory'],
-    'accessory': ['bag', 'handbag', 'purse', 'backpack', 'accessory', 'jewelry', 'watch', 'belt', 'hat'],
-}
-
-def get_compatible_categories(cat: str) -> list[str]:
-    cat = cat.lower()
-    return CATEGORY_FAMILIES.get(cat, [cat])
-
-def cosine_distance(v1, v2):
     dot = sum(a*b for a,b in zip(v1, v2))
     mag1 = sum(a*a for a in v1) ** 0.5
     mag2 = sum(b*b for b in v2) ** 0.5
@@ -258,11 +238,8 @@ async def process_job_background(job_id: str):
             item_id = item["id"]
             source_path = item["source_image_path"]
             
-            # Atomic claim
-            if not supabase_job_service.claim_job_item(item_id):
-                continue
-            
             try:
+                supabase_job_service.update_job_item_status(item_id, "analyzing", progress=0.1)
                 image_data = supabase_job_service.supabase.storage.from_("wardrobe").download(source_path)
                 supabase_job_service.update_job_item_status(item_id, "analyzing", progress=0.3)
                 
@@ -276,20 +253,14 @@ async def process_job_background(job_id: str):
                     
                 if len(people) > 1:
                     supabase_job_service.update_job_item_status(
-                        item_id, "failed", 
+                        item_id, "skipped", 
                         error_message="Multiple people detected. Atayr currently works with photos containing one person."
                     )
                     failed_count += 1
                     continue
 
                 garments_found = people[0].get("garments", [])
-                seen_garment_ids = set()
                 for garment_item in garments_found:
-                    g_id = garment_item.get("id")
-                    if g_id in seen_garment_ids:
-                        continue
-                    seen_garment_ids.add(g_id)
-                    
                     garments_to_process.append({
                         "item_id": item_id,
                         "source_path": source_path,
@@ -309,13 +280,9 @@ async def process_job_background(job_id: str):
         
         # Group garments by item_id to update item status properly
         item_progress = {g["item_id"]: 0 for g in garments_to_process}
-        failed_item_ids = set()
         
         for g in garments_to_process:
             item_id = g["item_id"]
-            if item_id in failed_item_ids:
-                continue
-                
             garment_item = g["garment_item"]
             image_data = g["image_data"]
             source_path = g["source_path"]
@@ -326,32 +293,20 @@ async def process_job_background(job_id: str):
             category = garment_item.get("category", "Unknown")
             
             if not embedding:
-                print(f"\n[EMBEDDING FAILURE]")
-                print(f"  Garment Temp ID: {garment_item.get('id', 'unknown')}")
-                print(f"  Category: {category}")
-                print(f"  Embedding Model: text-embedding-004")
-                print(f"  Failure Reason: EMBEDDING_GENERATION_FAILED")
-                print(f"  Retry Status: Marked item {item_id} as failed/retryable\n")
-                
-                failed_item_ids.add(item_id)
-                supabase_job_service.update_job_item_status(item_id, "failed", error_message="EMBEDDING_GENERATION_FAILED")
-                failed_count += 1
+                print(f"Failed to generate embedding for {garment_item.get('name')}")
                 continue
 
             matched_garment_id = None
             
             # 1. Check against DB
-            compatible_cats = get_compatible_categories(category)
-            db_candidates = []
-            for c_cat in compatible_cats:
-                db_candidates.extend(supabase_job_service.match_garment_observation(user_id, c_cat, embedding, threshold=CONFIDENT_MATCH_DISTANCE_THRESHOLD))
+            db_candidates = supabase_job_service.match_garment_observation(user_id, category, embedding, threshold=0.15)
             
             # 2. Check against in-memory (intra-batch)
             memory_candidates = []
             for nu in new_unique_garments:
-                if nu["category"].lower() in compatible_cats:
+                if nu["category"] == category:
                     dist = cosine_distance(nu["embedding"], embedding)
-                    if dist <= CONFIDENT_MATCH_DISTANCE_THRESHOLD:
+                    if dist <= 0.15:
                         memory_candidates.append({"garment_id": nu["garment_id"], "similarity": 1.0 - dist})
             
             all_candidates = db_candidates + memory_candidates
@@ -360,27 +315,29 @@ async def process_job_background(job_id: str):
             if all_candidates:
                 top_candidate = all_candidates[0]
                 best_similarity = top_candidate["similarity"]
-                best_distance = 1.0 - best_similarity
                 best_id = top_candidate["garment_id"]
                 
-                print(f"\n[DUPLICATE MATCH]")
-                print(f"User: {user_id}")
-                print(f"Category: {category} (Compatible searched: {compatible_cats})")
-                print(f"Candidate garment: {best_id}")
-                print(f"Cosine distance: {best_distance:.4f}")
-                print(f"Threshold: <= {CONFIDENT_MATCH_DISTANCE_THRESHOLD}")
-                
-                if best_distance <= CONFIDENT_MATCH_DISTANCE_THRESHOLD:
+                # High Confidence Match
+                if best_similarity >= 0.95: # meaning distance <= 0.05
                     matched_garment_id = best_id
-                    print("Decision: REUSE_EXISTING")
+                    print(f"High confidence match ({best_similarity}) for {category}. ID: {best_id}")
                 else:
-                    print("Decision: CREATE_NEW (Uncertain match defaulted to new garment to prevent false merges)")
-            else:
-                print(f"\n[DUPLICATE MATCH]")
-                print(f"User: {user_id}")
-                print(f"Category: {category}")
-                print("Candidate garment: None")
-                print("Decision: CREATE_NEW (No candidates found)")
+                    # Ambiguous Match (distance between 0.05 and 0.15) -> LLM Verification
+                    print(f"Ambiguous match ({best_similarity}) for {category}. Running LLM verification...")
+                    
+                    # Fetch candidate attributes from DB (only if it's a DB candidate, memory ones we'd have to store)
+                    db_candidate_ids = [c["garment_id"] for c in db_candidates[:3]]
+                    candidate_records = supabase_job_service.get_garments_by_ids(db_candidate_ids) if db_candidate_ids else []
+                    
+                    if candidate_records:
+                        decision, verified_id = await asyncio.to_thread(
+                            verify_garment_duplicate, garment_item, candidate_records, image_data
+                        )
+                        print(f"LLM Decision: {decision}")
+                        if decision == "SAME_GARMENT" and verified_id:
+                            matched_garment_id = verified_id
+                        elif decision == "SAME_GARMENT":
+                            matched_garment_id = best_id # fallback to top if verified_id is missing
 
             if matched_garment_id:
                 # It's a duplicate, just insert observation
@@ -402,53 +359,12 @@ async def process_job_background(job_id: str):
                 }
                 supabase_job_service.insert_garment_observation(obs_row)
             else:
-                # It's a new garment, Re-check job item status before expensive generation
-                check_item = supabase_job_service.supabase.table("processing_job_items").select("status").eq("id", item_id).execute()
-                if not check_item.data or check_item.data[0]["status"] not in ("analyzing", "generating"):
-                    print(f"Skipping generation for {item_id}: status changed.")
-                    failed_item_ids.add(item_id)
-                    continue
-
-                # Generate studio image
+                # It's a new garment, generate studio image
                 img_bytes, generated_id = await asyncio.to_thread(
                     generate_garment_image, image_data, "image/jpeg", garment_item
                 )
                 
-                transparent_bytes, bg_status = await asyncio.to_thread(
-                    remove_background, img_bytes
-                )
-                
-                # Double-Checked Vector Search (Concurrency Protection)
-                # Another worker might have inserted the canonical garment while we were generating.
-                re_candidates = []
-                for c_cat in compatible_cats:
-                    re_candidates.extend(supabase_job_service.match_garment_observation(user_id, c_cat, embedding, threshold=CONFIDENT_MATCH_DISTANCE_THRESHOLD))
-                
-                re_candidates.sort(key=lambda x: x["similarity"], reverse=True)
-                if re_candidates and (1.0 - re_candidates[0]["similarity"]) <= CONFIDENT_MATCH_DISTANCE_THRESHOLD:
-                    print(f"\n[DOUBLE-CHECKED LOCK] Caught concurrent insertion! Reusing {re_candidates[0]['garment_id']}")
-                    matched_garment_id = re_candidates[0]["garment_id"]
-                    
-                    obs_uuid = str(uuid.uuid4())
-                    obs_row = {
-                        'id': obs_uuid,
-                        'garment_id': matched_garment_id,
-                        'source_image_path': source_path,
-                        'embedding': embedding,
-                        'detected_attributes': {
-                            'category': category,
-                            'subcategory': garment_item.get("subcategory"),
-                            'primary_color': garment_item.get("primary_color"),
-                            'secondary_color': garment_item.get("secondary_color"),
-                            'pattern': garment_item.get("pattern"),
-                            'style': garment_item.get("style"),
-                            'fit': garment_item.get("fit")
-                        }
-                    }
-                    supabase_job_service.insert_garment_observation(obs_row)
-                    continue # skip insertion
-                
-                # 4. Upload garment to Supabase
+                transparent_bytes, bg_status = await asyncio.to_thread(remove_background, img_bytes)
                 
                 garment_uuid = str(uuid.uuid4())
                 studio_image_path = f"{user_id}/garments/{garment_uuid}.png"
@@ -503,9 +419,8 @@ async def process_job_background(job_id: str):
         # Mark all fully processed items as completed
         processed_item_ids = set([g["item_id"] for g in garments_to_process])
         for item_id in processed_item_ids:
-            if item_id not in failed_item_ids:
-                supabase_job_service.update_job_item_status(item_id, "completed", progress=1.0)
-                completed_count += 1
+            supabase_job_service.update_job_item_status(item_id, "completed", progress=1.0)
+            completed_count += 1
 
         # Finalize Job Status
         remaining_items = supabase_job_service.supabase.table("processing_job_items").select("*").eq("job_id", job_id).execute()
@@ -531,19 +446,8 @@ async def process_job_background(job_id: str):
 
 
 async def resume_job_item_background(item_id: str, person_id: str):
-    """
-    Resumes processing for a job item that was paused for person selection.
-    """
     try:
-        # Atomic claim
-        if not supabase_job_service.claim_paused_job_item(item_id):
-            print(f"Item {item_id} is already being resumed or processed.")
-            return
-
-        item_res = supabase_job_service.supabase.table("processing_job_items").select("*").eq("id", item_id).execute()
-        if not item_res.data:
-            return
-        item = item_res.data[0]
+        item = supabase_job_service.supabase.table("processing_job_items").select("*").eq("id", item_id).execute().data[0]
         job_id = item["job_id"]
         user_id = item["user_id"]
         source_path = item["source_image_path"]
@@ -563,7 +467,6 @@ async def resume_job_item_background(item_id: str, person_id: str):
         
         supabase_job_service.update_job_item_status(item_id, "generating", progress=0.5)
         
-        has_failure = False
         for garment_item in garments_found:
             
             # --- DEDUPLICATION LOGIC (STEP 12) ---
@@ -582,51 +485,30 @@ async def resume_job_item_background(item_id: str, person_id: str):
                 print(f"  MULTIMODAL EMBEDDING FAILED")
             print(f"  Embedding Source Type: {log_data.get('embedding_source_type')}")
             
-            if not embedding:
-                print(f"\n[EMBEDDING FAILURE]")
-                print(f"  Garment Temp ID: {garment_item.get('id', 'unknown')}")
-                print(f"  Category: {category}")
-                print(f"  Embedding Model: text-embedding-004")
-                print(f"  Failure Reason: EMBEDDING_GENERATION_FAILED")
-                print(f"  Retry Status: Marked item {item_id} as failed/retryable\n")
-                
-                supabase_job_service.update_job_item_status(item_id, "failed", error_message="EMBEDDING_GENERATION_FAILED")
-                has_failure = True
-                break
-                
             matched_garment_id = None
             
-            compatible_cats = get_compatible_categories(category)
-            db_candidates = []
-            for c_cat in compatible_cats:
-                db_candidates.extend(supabase_job_service.match_garment_observation(user_id, c_cat, embedding, threshold=CONFIDENT_MATCH_DISTANCE_THRESHOLD))
-                
-            db_candidates.sort(key=lambda x: x["similarity"], reverse=True)
-            
+            db_candidates = supabase_job_service.match_garment_observation(user_id, category, embedding, threshold=0.15)
             if db_candidates:
                 top_candidate = db_candidates[0]
                 best_similarity = top_candidate["similarity"]
-                best_distance = 1.0 - best_similarity
                 best_id = top_candidate["garment_id"]
                 
-                print(f"\n[DUPLICATE MATCH]")
-                print(f"User: {user_id}")
-                print(f"Category: {category} (Compatible searched: {compatible_cats})")
-                print(f"Candidate garment: {best_id}")
-                print(f"Cosine distance: {best_distance:.4f}")
-                print(f"Threshold: <= {CONFIDENT_MATCH_DISTANCE_THRESHOLD}")
-                
-                if best_distance <= CONFIDENT_MATCH_DISTANCE_THRESHOLD:
+                if best_similarity >= 0.95:
                     matched_garment_id = best_id
-                    print("Decision: REUSE_EXISTING")
+                    print(f"High confidence match ({best_similarity}) for {category}. ID: {best_id}")
                 else:
-                    print("Decision: CREATE_NEW (Uncertain match defaulted to new garment to prevent false merges)")
-            else:
-                print(f"\n[DUPLICATE MATCH]")
-                print(f"User: {user_id}")
-                print(f"Category: {category}")
-                print("Candidate garment: None")
-                print("Decision: CREATE_NEW (No candidates found)")
+                    print(f"Ambiguous match ({best_similarity}) for {category}. Running LLM verification...")
+                    db_candidate_ids = [c["garment_id"] for c in db_candidates[:3]]
+                    candidate_records = supabase_job_service.get_garments_by_ids(db_candidate_ids) if db_candidate_ids else []
+                    
+                    if candidate_records:
+                        decision, verified_id = await asyncio.to_thread(
+                            verify_garment_duplicate, garment_item, candidate_records, image_data
+                        )
+                        if decision == "SAME_GARMENT" and verified_id:
+                            matched_garment_id = verified_id
+                        elif decision == "SAME_GARMENT":
+                            matched_garment_id = best_id
             
             if matched_garment_id:
                 obs_uuid = str(uuid.uuid4())
@@ -647,13 +529,6 @@ async def resume_job_item_background(item_id: str, person_id: str):
                 }
                 supabase_job_service.insert_garment_observation(obs_row)
             else:
-                # Re-check job item status before expensive generation
-                check_item = supabase_job_service.supabase.table("processing_job_items").select("status").eq("id", item_id).execute()
-                if not check_item.data or check_item.data[0]["status"] not in ("analyzing", "generating"):
-                    print(f"Skipping generation for {item_id}: status changed.")
-                    has_failure = True
-                    break
-
                 img_bytes, generated_id = await asyncio.to_thread(
                     generate_garment_image, image_data, "image/jpeg", garment_item
                 )
@@ -661,35 +536,6 @@ async def resume_job_item_background(item_id: str, person_id: str):
                 transparent_bytes, bg_status = await asyncio.to_thread(
                     remove_background, img_bytes
                 )
-                
-                # Double-Checked Vector Search (Concurrency Protection)
-                re_candidates = []
-                for c_cat in compatible_cats:
-                    re_candidates.extend(supabase_job_service.match_garment_observation(user_id, c_cat, embedding, threshold=CONFIDENT_MATCH_DISTANCE_THRESHOLD))
-                
-                re_candidates.sort(key=lambda x: x["similarity"], reverse=True)
-                if re_candidates and (1.0 - re_candidates[0]["similarity"]) <= CONFIDENT_MATCH_DISTANCE_THRESHOLD:
-                    print(f"\n[DOUBLE-CHECKED LOCK] Caught concurrent insertion! Reusing {re_candidates[0]['garment_id']}")
-                    matched_garment_id = re_candidates[0]["garment_id"]
-                    
-                    obs_uuid = str(uuid.uuid4())
-                    obs_row = {
-                        'id': obs_uuid,
-                        'garment_id': matched_garment_id,
-                        'source_image_path': source_path,
-                        'embedding': embedding,
-                        'detected_attributes': {
-                            'category': category,
-                            'subcategory': garment_item.get("subcategory"),
-                            'primary_color': garment_item.get("primary_color"),
-                            'secondary_color': garment_item.get("secondary_color"),
-                            'pattern': garment_item.get("pattern"),
-                            'style': garment_item.get("style"),
-                            'fit': garment_item.get("fit")
-                        }
-                    }
-                    supabase_job_service.insert_garment_observation(obs_row)
-                    continue
                 
                 garment_uuid = str(uuid.uuid4())
                 studio_image_path = f"{user_id}/garments/{garment_uuid}.png"
@@ -733,8 +579,7 @@ async def resume_job_item_background(item_id: str, person_id: str):
                 }
                 supabase_job_service.insert_garment_observation(obs_row)
             
-        if not has_failure:
-            supabase_job_service.update_job_item_status(item_id, "completed", progress=1.0)
+        supabase_job_service.update_job_item_status(item_id, "completed", progress=1.0)
         
         # Check if job is fully completed now
         remaining_items = supabase_job_service.supabase.table("processing_job_items").select("*").eq("job_id", job_id).execute()

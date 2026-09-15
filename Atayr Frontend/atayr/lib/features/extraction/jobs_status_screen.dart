@@ -56,6 +56,10 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
         );
       case 'queued':
         return const Icon(Icons.schedule, color: Colors.orange);
+      case 'requires_action':
+        return const Icon(Icons.touch_app, color: Colors.deepOrange);
+      case 'skipped':
+        return const Icon(Icons.do_not_disturb_alt, color: Colors.deepOrange);
       case 'failed':
       case 'cancelled':
         return const Icon(Icons.error, color: Colors.red);
@@ -134,7 +138,8 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                                 children: [
                                   const SizedBox(height: 8),
                                   Text('DATE: ${_formatDate(job.createdAt)}'),
-                                  Text('ITEMS: ${job.totalItems}'),
+                                  Text('PROCESSED: ${job.completedItems}'),
+                                  Text('SKIPPED/FAILED: ${job.failedItems}'),
                                   if (job.errorMessage != null)
                                     Text('ERROR: ${job.errorMessage}', style: const TextStyle(color: Colors.red)),
                                 ],
@@ -151,7 +156,7 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                                 ],
                               ),
                               onTap: () {
-                                // Detailed view of Job Items could go here
+                                _showJobItems(job.id);
                               },
                             ),
                           );
@@ -159,5 +164,102 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                       ),
       ),
     );
+  }
+
+  void _showJobItems(String jobId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AtayrColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('JOB ITEMS', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 16),
+              Expanded(
+                child: FutureBuilder<List<ProcessingJobItem>>(
+                  future: _extractionService.getJobItems(jobId),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: AtayrColors.ink));
+                    }
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
+                    }
+                    
+                    final items = snapshot.data ?? [];
+                    if (items.isEmpty) {
+                      return const Center(child: Text('No items found.'));
+                    }
+
+                    return ListView.builder(
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        final isSkipped = item.status == 'skipped';
+                        
+                        return Card(
+                          color: AtayrColors.background,
+                          shape: RoundedRectangleBorder(
+                            side: const BorderSide(color: AtayrColors.ink, width: 1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListTile(
+                            leading: _buildStatusIcon(item.status),
+                            title: Text('ITEM ${index + 1} - ${item.status.toUpperCase()}'),
+                            subtitle: isSkipped
+                                ? Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 4),
+                                      const Text('Multiple people detected.', style: TextStyle(color: Colors.deepOrange, fontWeight: FontWeight.bold)),
+                                      const SizedBox(height: 4),
+                                      const Text('Atayr currently works with photos containing one person. Please upload a photo where you\'re alone.', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        children: [
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: AtayrColors.ink, foregroundColor: Colors.white),
+                                            onPressed: () => Navigator.pop(context),
+                                            child: const Text('Choose another photo', style: TextStyle(fontSize: 12)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(context),
+                                            child: const Text('Skip', style: TextStyle(fontSize: 12)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  )
+                                : Text('Progress: ${(item.progress * 100).toInt()}%'),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _navigateToPersonSelection(ProcessingJobItem item) {
+    // We will navigate to PersonSelectionScreen, passing the item
+    // For now, we will create that screen in the next step
+    Navigator.pushNamed(context, '/person_selection', arguments: item).then((_) {
+      // Refresh jobs when returning
+      _loadJobs();
+    });
   }
 }

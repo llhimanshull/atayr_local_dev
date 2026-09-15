@@ -9,6 +9,7 @@ import io
 import json
 import uuid
 import base64
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -97,16 +98,29 @@ def generate_garment_image(
     for attempt in range(1, max_retries + 1):
         print(f"  -> Generating standalone image for garment {garment_id} via {model} (Attempt {attempt})...")
 
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_bytes(data=original_image, mime_type=mime_type),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-            ),
-        )
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_bytes(data=original_image, mime_type=mime_type),
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                ),
+            )
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e).upper():
+                sleep_time = attempt * 10
+                print(f"  -> [Attempt {attempt}] Rate limit hit (429). Sleeping for {sleep_time} seconds before retrying...")
+                time.sleep(sleep_time)
+                continue
+            
+            if attempt == max_retries:
+                raise
+            print(f"  -> [Attempt {attempt}] API Error: {e}. Retrying...")
+            time.sleep(2)
+            continue
 
         if not response.candidates:
             if attempt == max_retries:
