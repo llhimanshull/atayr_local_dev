@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atayr - Stage 1 Extractor</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --text-color: #f8fafc;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        h1 {
+            text-align: center;
+            font-weight: 300;
+            letter-spacing: 2px;
+            margin-bottom: 2rem;
+            background: linear-gradient(to right, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 3rem 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .upload-area input {
+            display: none;
+        }
+
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            width: 100%;
+            margin-top: 1rem;
+        }
+
+        .btn:hover {
+            background: var(--accent-hover);
+        }
+        
+        .btn:disabled {
+            background: #475569;
+            cursor: not-allowed;
+        }
+
+        #preview {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            margin-top: 1rem;
+            display: none;
+            object-fit: contain;
+        }
+
+        .spinner {
+            display: none;
+            width: 40px;
+            height: 40px;
+            margin: 2rem auto;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-left-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: #1e293b;
+            border: 1px solid var(--border);
+            padding: 2rem;
+            border-radius: 16px;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .summary-btn {
+            display: block;
+            width: 100%;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            color: white;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+
+        .summary-btn:hover {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent);
+        }
+
+        pre {
+            background: rgba(0,0,0,0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            color: #a78bfa;
+        }
+
+        #result-area {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Atayr Stage 1</h1>
+        
+        <div class="card">
+            <label class="upload-area" id="drop-zone">
+                <input type="file" id="image-input" accept="image/*">
+                <div id="upload-text">Click or drag photo here</div>
+                <img id="preview" src="" alt="Preview">
+            </label>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="btn" id="analyze-btn" disabled style="margin-top: 0;">Step 1: Analyze</button>
+                <button class="btn" id="generate-btn" disabled style="margin-top: 0; background: #8b5cf6;">Step 2: Generate Image</button>
+            </div>
+        </div>
+
+        <div class="spinner" id="spinner"></div>
+
+        <div class="card" id="result-area">
+            <h3>Extraction Result</h3>
+            <img id="composite-preview" src="" alt="Composite Generation" style="display:none; max-width:100%; border-radius:8px; margin-bottom:1rem;">
+            <pre id="json-output"></pre>
+        </div>
+    </div>
+
+    <div class="modal" id="disambiguation-modal">
+        <div class="modal-content">
+            <h2 style="margin-top:0;">Multiple People Detected</h2>
+            <p>This photo has multiple people. Which outfit is yours?</p>
+            <div id="options-container"></div>
+        </div>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('image-input');
+        const preview = document.getElementById('preview');
+        const uploadText = document.getElementById('upload-text');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const spinner = document.getElementById('spinner');
+        const resultArea = document.getElementById('result-area');
+        const jsonOutput = document.getElementById('json-output');
+        const modal = document.getElementById('disambiguation-modal');
+        const optionsContainer = document.getElementById('options-container');
+        
+        const generateBtn = document.getElementById('generate-btn');
+        const compositePreview = document.getElementById('composite-preview');
+
+        let currentFile = null;
+        let currentAnalysis = null;
+        let currentSelectedOutfitId = null;
+        let currentAction = null;
+
+        imageInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                currentFile = e.target.files[0];
+                preview.src = URL.createObjectURL(currentFile);
+                preview.style.display = 'block';
+                uploadText.style.display = 'none';
+                analyzeBtn.disabled = false;
+                generateBtn.disabled = false;
+                resultArea.style.display = 'none';
+                compositePreview.style.display = 'none';
+                currentSelectedOutfitId = null;
+            }
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            if (!currentFile) return;
+            currentAction = 'analyze';
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+
+            analyzeBtn.disabled = true;
+            spinner.style.display = 'block';
+            resultArea.style.display = 'none';
+            compositePreview.style.display = 'none';
+            currentSelectedOutfitId = null;
+
+            try {
+                const res = await fetch('/analyze-only', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Analysis failed');
+                }
+
+                currentAnalysis = data.analysis;
+
+                if (currentAnalysis.status === 'requires_disambiguation') {
+                    showDisambiguationOptions(currentAnalysis.outfit_summaries);
+                } else {
+                    displayResult(currentAnalysis);
+                }
+
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                spinner.style.display = 'none';
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        function showDisambiguationOptions(summaries) {
+            optionsContainer.innerHTML = '';
+            summaries.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'summary-btn';
+                btn.textContent = opt.summary;
+                btn.onclick = () => selectOutfit(opt.outfit_id);
+                optionsContainer.appendChild(btn);
+            });
+            modal.style.display = 'flex';
+        }
+
+        function selectOutfit(outfitId) {
+            modal.style.display = 'none';
+            currentSelectedOutfitId = outfitId;
+            
+            if (currentAction === 'generate') {
+                // User wants to generate the image, resume the generation flow
+                generateBtn.click();
+            } else {
+                // User only wanted analysis, filter locally and show JSON
+                const filteredGarments = currentAnalysis.garments.filter(g => String(g.outfit_id) === String(outfitId));
+                currentAnalysis.garments = filteredGarments;
+                currentAnalysis.garment_count = filteredGarments.length;
+                currentAnalysis.multiple_people_detected = false;
+                currentAnalysis.outfit_summaries = null;
+                currentAnalysis.status = "success";
+
+                displayResult(currentAnalysis);
+            }
+        }
+
+        function displayResult(data) {
+            jsonOutput.textContent = JSON.stringify(data, null, 2);
+            resultArea.style.display = 'block';
+        }
+        
+        generateBtn.addEventListener('click', async () => {
+            if (!currentFile) return;
+            currentAction = 'generate';
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+            if (currentSelectedOutfitId) {
+                formData.append('selected_outfit_id', currentSelectedOutfitId);
+            }
+
+            generateBtn.disabled = true;
+            analyzeBtn.disabled = true;
+            spinner.style.display = 'block';
+            compositePreview.style.display = 'none';
+
+            try {
+                const res = await fetch('/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Generation failed');
+                }
+
+                if (data.status === 'requires_disambiguation') {
+                    currentAnalysis = data.analysis;
+                    showDisambiguationOptions(currentAnalysis.outfit_summaries);
+                } else {
+                    compositePreview.src = data.generated_image_url;
+                    compositePreview.style.display = 'block';
+                    jsonOutput.textContent = JSON.stringify(data.analysis || data, null, 2);
+                    resultArea.style.display = 'block';
+                }
+
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                spinner.style.display = 'none';
+                generateBtn.disabled = false;
+                analyzeBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

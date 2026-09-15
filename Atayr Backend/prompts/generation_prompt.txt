@@ -1,0 +1,28 @@
+You will receive a JSON object describing a single garment or accessory extracted from a reference photo. Your task is to generate a single standalone product image of this EXACT item, following every rule below exactly. Do not skip, reinterpret, or relax any rule.
+
+STEP 1: ISOLATION AND PRESENTATION
+- Generate EXACTLY ONE item in the center of the image. Do not create a grid. Do not create multiple items.
+- Background is pure flat white (#FFFFFF), no gradient, no texture, no vignette, across the entire canvas.
+- Leave a margin of at least 5 percent of canvas width or height between the item and the outer canvas edge.
+- No rendered content may touch or cross the canvas edge, under any circumstance.
+- No drop shadows, no cast shadows, no reflections beneath or around the item.
+- No human body, skin, hand, wrist, arm, neck, face, or any body part may appear anywhere in the image, under any circumstance, even partially, faintly, or blurred.
+
+STEP 2: ITEM-SPECIFIC PRESENTATION
+- The item must face forward, straight-on, in a symmetrical front view. Do not render the item at a side angle, three-quarter angle, back view, or rotated view.
+- If the item is a wearable garment (category: top, bottom, outerwear, dress, or jumpsuit), it MUST be rendered in ghost mannequin form. The garment holds its natural worn, three-dimensional shape as if filled by an invisible human form, with realistic drape, fold, and structure, but with ABSOLUTELY NO VISIBLE mannequin, form, or body of any kind.
+- If the item is footwear, it must be rendered upright as a standalone product shot without any foot, leg, or body part visible.
+- If the item is an accessory (glasses, jewelry, watches, bags, belts), it must be rendered as a clean standalone product shot appropriate to its type, resting or displayed on its own, never worn on, held by, or attached to any body part.
+
+STEP 3: FIDELITY TO REFERENCE
+- Render the fabric or material exactly as it appears in the reference photo. Preserve color, silhouette, proportions, neckline, sleeve shape, hem shape, seams, printed graphics, graphic placement, visible texture, visible construction details, and natural folds.
+- Do NOT redesign the garment. This is NOT a fashion redesign task.
+- Do NOT create a generic garment based on the metadata. The original image is the primary visual reference. The metadata is secondary and only helps identify which item to extract.
+- Do NOT change typography or graphic design.
+- Do NOT add logos, pockets, buttons, seams, patterns or accessories that are not visible in the source.
+
+STEP 4: REFERENCE IMAGE
+The reference image provided alongside this prompt shows the original photo the item was extracted from. Use it strictly as the visual source of truth for color accuracy, fabric appearance, and garment silhouette, matching the specific item to how it actually appears in that photo. Use the bounding box information in the JSON to identify exactly which item in the source image to extract. Do not copy any body, pose, background, or setting from the reference image, only the garment or accessory itself.
+
+JSON INPUT:
+[PASTE_EXTRACTED_GARMENT_JSON_HERE]

@@ -1,0 +1,45 @@
+# Secrets
+.env
+.env.*
+!.env.example
+service-account.json
+*.pem
+*.key
+google-services.json
+GoogleService-Info.plist
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.pytest_cache/
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Flutter / Frontend
+atayr/.dart_tool/
+atayr/.flutter-plugins
+atayr/.flutter-plugins-dependencies
+atayr/.packages
+atayr/build/
+atayr/ios/.symlinks/
+atayr/ios/Pods/
+atayr/windows/flutter/ephemeral/
+atayr/linux/flutter/ephemeral/
+atayr/macos/Flutter/ephemeral/
+
+# IDEs and OS
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
