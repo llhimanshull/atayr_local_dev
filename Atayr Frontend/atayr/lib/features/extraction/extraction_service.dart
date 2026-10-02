@@ -361,7 +361,9 @@ class ExtractionService {
     // 4. Trigger backend background processing
     final uri = Uri.parse('$baseUrl/process-job/$jobId');
     try {
-      final response = await http.post(uri).timeout(const Duration(seconds: 10));
+      final token = _supabase.auth.currentSession?.accessToken;
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
+      final response = await http.post(uri, headers: headers).timeout(const Duration(seconds: 10));
       if (response.statusCode != 200 && response.statusCode != 202) {
         // print('Warning: Backend returned ${response.statusCode} for process-job');
       }
@@ -380,7 +382,9 @@ class ExtractionService {
   Future<void> resumeJobItem(String itemId, String personId) async {
     final uri = Uri.parse('$baseUrl/process-job-item/$itemId/resume?person_id=$personId');
     try {
-      final response = await http.post(uri).timeout(const Duration(seconds: 10));
+      final token = _supabase.auth.currentSession?.accessToken;
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
+      final response = await http.post(uri, headers: headers).timeout(const Duration(seconds: 10));
       if (response.statusCode != 200 && response.statusCode != 202) {
         throw ExtractionException('Failed to resume item: ${response.statusCode}');
       }

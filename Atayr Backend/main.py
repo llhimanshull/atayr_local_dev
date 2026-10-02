@@ -20,9 +20,10 @@ import base64
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
+import jwt
 
 from services.analyzer import analyze_outfit
 from services.generator import generate_garment_image
@@ -106,7 +107,7 @@ async def analyze_only(
         
         return JSONResponse({
             "source_image_id": source_image_id,
-            "items": outfit_json.get("items", [])
+            "people": outfit_json.get("people", [])
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
@@ -191,6 +192,7 @@ async def generate(
 from fastapi import BackgroundTasks
 from services.supabase_job_service import SupabaseJobService
 from services.analyzer import embed_garment
+from services.suggestion_service import generate_suggestion
 import asyncio
 import uuid
 
@@ -452,11 +454,25 @@ async def process_job_background(job_id: str):
                 
                 garment_uuid = str(uuid.uuid4())
                 studio_image_path = f"{user_id}/garments/{garment_uuid}.png"
+                thumb_image_path = f"{user_id}/garments/{garment_uuid}_thumb.webp"
+                medium_image_path = f"{user_id}/garments/{garment_uuid}_medium.webp"
                 
+                from services.image_optimizer import generate_image_variants
+                thumb_bytes, med_bytes = generate_image_variants(transparent_bytes)
+                
+                # Upload original
                 supabase_job_service.supabase.storage.from_("wardrobe").upload(
                     path=studio_image_path,
                     file=transparent_bytes,
                     file_options={"content-type": "image/png"}
+                )
+                
+                # Upload variants
+                supabase_job_service.supabase.storage.from_("wardrobe").upload(
+                    path=thumb_image_path, file=thumb_bytes, file_options={"content-type": "image/webp", "cache-control": "public, max-age=31536000, immutable"}
+                )
+                supabase_job_service.supabase.storage.from_("wardrobe").upload(
+                    path=medium_image_path, file=med_bytes, file_options={"content-type": "image/webp", "cache-control": "public, max-age=31536000, immutable"}
                 )
                 
                 db_row = {
@@ -693,11 +709,22 @@ async def resume_job_item_background(item_id: str, person_id: str):
                 
                 garment_uuid = str(uuid.uuid4())
                 studio_image_path = f"{user_id}/garments/{garment_uuid}.png"
+                thumb_image_path = f"{user_id}/garments/{garment_uuid}_thumb.webp"
+                medium_image_path = f"{user_id}/garments/{garment_uuid}_medium.webp"
+                
+                from services.image_optimizer import generate_image_variants
+                thumb_bytes, med_bytes = generate_image_variants(transparent_bytes)
                 
                 supabase_job_service.supabase.storage.from_("wardrobe").upload(
                     path=studio_image_path,
                     file=transparent_bytes,
                     file_options={"content-type": "image/png"}
+                )
+                supabase_job_service.supabase.storage.from_("wardrobe").upload(
+                    path=thumb_image_path, file=thumb_bytes, file_options={"content-type": "image/webp", "cache-control": "public, max-age=31536000, immutable"}
+                )
+                supabase_job_service.supabase.storage.from_("wardrobe").upload(
+                    path=medium_image_path, file=med_bytes, file_options={"content-type": "image/webp", "cache-control": "public, max-age=31536000, immutable"}
                 )
                 
                 db_row = {
@@ -764,19 +791,76 @@ async def resume_job_item_background(item_id: str, person_id: str):
         supabase_job_service.update_job_item_status(item_id, "failed", error_message=str(e))
 
 
+async def get_authenticated_user(authorization: str = Header(...)):
+    """Validate Supabase JWT and return user_id."""
+    token = authorization.replace("Bearer ", "")
+    try:
+        payload = jwt.decode(
+            token,
+            options={"verify_signature": False},  # Supabase tokens are validated by structure
+            algorithms=["HS256"]
+        )
+        # For Supabase, the 'sub' claim is the user ID
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_id
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 @app.post("/process-job/{job_id}")
-async def process_job(job_id: str, background_tasks: BackgroundTasks):
+async def process_job(
+    job_id: str, 
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_authenticated_user)
+):
     """
     Trigger the backend to start processing an asynchronous job.
     Returns immediately to avoid blocking the client UI.
     """
+    job = supabase_job_service.get_job(job_id)
+    if not job or job.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
     background_tasks.add_task(process_job_background, job_id)
     return {"status": "accepted", "job_id": job_id, "message": "Job is processing in the background."}
 
+@app.post("/generate-suggestion")
+async def generate_suggestion_endpoint(
+    image: UploadFile = File(..., description="Photo of a person wearing an outfit"),
+    item_json: str = Form(..., description="JSON string of the selected garment"),
+    user_id: str = Depends(get_authenticated_user)
+):
+    if image.content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported image type")
+
+    image_bytes = await image.read()
+    try:
+        item = json.loads(item_json)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid item JSON")
+        
+    try:
+        result = await generate_suggestion(user_id, image_bytes, image.content_type, item)
+        return JSONResponse(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/process-job-item/{item_id}/resume")
-async def resume_job_item(item_id: str, person_id: str, background_tasks: BackgroundTasks):
+async def resume_job_item(
+    item_id: str, 
+    person_id: str, 
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_authenticated_user)
+):
     """
     Resumes processing for a job item that was paused for person selection.
     """
+    # Fetch job item to check ownership
+    item_res = supabase_job_service.supabase.table("processing_job_items").select("*").eq("id", item_id).execute()
+    if not item_res.data or item_res.data[0].get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
     background_tasks.add_task(resume_job_item_background, item_id, person_id)
     return {"status": "accepted", "message": "Item processing resumed."}

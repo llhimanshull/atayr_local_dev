@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme/atayr_colors.dart';
 import '../../core/widgets/neo_button.dart';
 import '../../core/widgets/neo_chip.dart';
@@ -9,8 +10,15 @@ import 'wardrobe_service.dart';
 
 class GarmentDetailScreen extends StatefulWidget {
   final Garment garment;
+  final bool readOnly;
+  final String? ownerName;
 
-  const GarmentDetailScreen({super.key, required this.garment});
+  const GarmentDetailScreen({
+    super.key, 
+    required this.garment,
+    this.readOnly = false,
+    this.ownerName,
+  });
 
   @override
   State<GarmentDetailScreen> createState() => _GarmentDetailScreenState();
@@ -90,6 +98,8 @@ class _GarmentDetailScreenState extends State<GarmentDetailScreen> {
     }
   }
 
+
+
   void _confirmDelete() {
     showDialog(
       context: context,
@@ -164,10 +174,13 @@ class _GarmentDetailScreenState extends State<GarmentDetailScreen> {
                     border: Border.all(color: AtayrColors.ink, width: 2),
                     color: AtayrColors.surface,
                   ),
-                  child: Image.network(
-                    _wardrobeService.getPublicImageUrl(_garment.studioImagePath),
+                  child: CachedNetworkImage(
+                    imageUrl: _wardrobeService.getPublicImageUrl(_garment.studioImagePath),
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => const Center(
+                    placeholder: (context, url) => const Center(
+                      child: CircularProgressIndicator(color: AtayrColors.ink),
+                    ),
+                    errorWidget: (context, url, error) => const Center(
                       child: Icon(Icons.broken_image, size: 64, color: AtayrColors.ink),
                     ),
                   ),
@@ -185,12 +198,27 @@ class _GarmentDetailScreenState extends State<GarmentDetailScreen> {
                         style: Theme.of(context).textTheme.displaySmall?.copyWith(fontSize: 32),
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.edit, color: AtayrColors.ink),
-                      onPressed: _showEditNameDialog,
-                    ),
+                    if (!widget.readOnly)
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: AtayrColors.ink),
+                        onPressed: _showEditNameDialog,
+                      ),
                   ],
                 ),
+                if (widget.readOnly && widget.ownerName != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AtayrColors.accent,
+                      border: Border.all(color: AtayrColors.ink, width: 2),
+                    ),
+                    child: Text(
+                      'OWNED BY ${widget.ownerName!.toUpperCase()}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: AtayrColors.ink),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 
                 // Metadata Section
@@ -201,26 +229,33 @@ class _GarmentDetailScreenState extends State<GarmentDetailScreen> {
                   runSpacing: 12,
                   children: [
                     NeoChip(label: 'CAT: ${_garment.category.toUpperCase()}'),
-                    NeoChip(label: 'SUB: ${_garment.subcategory.toUpperCase()}'),
+                    if (_garment.subcategory != null)
+                      NeoChip(label: 'SUB: ${_garment.subcategory!.toUpperCase()}'),
                     if (_garment.primaryColor != null)
                       NeoChip(label: 'COLOR: ${_garment.primaryColor!.toUpperCase()}'),
                     if (_garment.secondaryColor != null)
                       NeoChip(label: 'SEC: ${_garment.secondaryColor!.toUpperCase()}'),
-                    NeoChip(label: 'PATTERN: ${_garment.pattern.toUpperCase()}'),
-                    NeoChip(label: 'STYLE: ${_garment.style.toUpperCase()}'),
-                    NeoChip(label: 'FIT: ${_garment.fit.toUpperCase()}'),
+                    if (_garment.pattern != null)
+                      NeoChip(label: 'PATTERN: ${_garment.pattern!.toUpperCase()}'),
+                    if (_garment.style != null)
+                      NeoChip(label: 'STYLE: ${_garment.style!.toUpperCase()}'),
+                    if (_garment.fit != null)
+                      NeoChip(label: 'FIT: ${_garment.fit!.toUpperCase()}'),
                   ],
                 ),
-                const SizedBox(height: 48),
                 
-                // Delete
-                NeoButton(
-                  label: 'DELETE GARMENT',
-                  onPressed: _confirmDelete,
-                  isPrimary: false,
-                  icon: Icons.delete_outline,
-                ),
-                const SizedBox(height: 24),
+                if (!widget.readOnly) ...[
+
+                  
+                  // Delete
+                  NeoButton(
+                    label: 'DELETE GARMENT',
+                    onPressed: _confirmDelete,
+                    isPrimary: false,
+                    icon: Icons.delete_outline,
+                  ),
+                  const SizedBox(height: 24),
+                ],
               ],
             ),
     );

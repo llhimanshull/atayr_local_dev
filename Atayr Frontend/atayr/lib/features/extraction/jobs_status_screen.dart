@@ -253,13 +253,4 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
       },
     );
   }
-
-  void _navigateToPersonSelection(ProcessingJobItem item) {
-    // We will navigate to PersonSelectionScreen, passing the item
-    // For now, we will create that screen in the next step
-    Navigator.pushNamed(context, '/person_selection', arguments: item).then((_) {
-      // Refresh jobs when returning
-      _loadJobs();
-    });
-  }
 }

@@ -47,7 +47,7 @@ def analyze_outfit(image_bytes: bytes, mime_type: str) -> dict:
 
     prompt = _load_analysis_prompt()
     
-    max_retries = 1
+    max_retries = 3
 
     for attempt in range(max_retries + 1):
         print(f"  -> Sending image ({len(image_bytes)} bytes) to {model} for analysis (Attempt {attempt + 1})...")
@@ -69,6 +69,7 @@ def analyze_outfit(image_bytes: bytes, mime_type: str) -> dict:
             if not response.parsed:
                 if attempt < max_retries:
                     print("  -> Empty or unparsed response, retrying...")
+                    time.sleep(2)
                     continue
                 raise ValueError("Gemini returned an empty or unparsed response for analysis")
 
@@ -76,8 +77,17 @@ def analyze_outfit(image_bytes: bytes, mime_type: str) -> dict:
             return response.parsed.model_dump()
             
         except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e).upper():
+                sleep_time = (attempt + 1) * 10
+                print(f"  -> [Attempt {attempt + 1}] Rate limit hit (429). Sleeping for {sleep_time} seconds before retrying...")
+                import time
+                time.sleep(sleep_time)
+                continue
+                
             if attempt < max_retries:
                 print(f"  -> Generation failed. Retrying... Error: {e}")
+                import time
+                time.sleep(2 ** attempt)
                 continue
             else:
                 raise ValueError(

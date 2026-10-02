@@ -4,8 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/app_config.dart';
 import 'core/theme/app_theme.dart';
 import 'services/auth_service.dart';
-import 'services/api_service.dart';
-import 'services/garment_repository.dart';
+import 'services/friend_service.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/auth/root_screen.dart';
 import 'features/extraction/person_selection_screen.dart';
@@ -29,8 +28,7 @@ void main() async {
       providers: [
         Provider<AuthService>.value(value: authService),
         ChangeNotifierProvider<AuthProvider>(create: (_) => AuthProvider(authService)),
-        Provider<ApiService>(create: (_) => ApiService()),
-        Provider<GarmentRepository>(create: (_) => GarmentRepository()),
+        Provider<FriendService>(create: (_) => FriendService()),
       ],
       child: const AtayrApp(),
     ),

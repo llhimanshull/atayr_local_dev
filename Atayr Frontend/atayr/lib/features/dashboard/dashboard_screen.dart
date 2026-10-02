@@ -3,7 +3,7 @@ import '../../core/theme/atayr_colors.dart';
 import '../home/home_screen.dart';
 import '../wardrobe/wardrobe_screen.dart';
 import '../profile/profile_screen.dart';
-import '../borrow/borrow_screen.dart';
+import '../friends/friends_screen.dart';
 import '../extraction/extraction_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -20,7 +20,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     HomeScreen(),
     WardrobeScreen(),
     // ADD is index 2, handled outside this list
-    BorrowScreen(),
+    FriendsScreen(),
     ProfileScreen(),
   ];
 
@@ -75,7 +75,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               label: 'ADD',
             ),
-            const BottomNavigationBarItem(icon: Icon(Icons.handshake_outlined), activeIcon: Icon(Icons.handshake), label: 'BORROW'),
+            const BottomNavigationBarItem(icon: Icon(Icons.group_outlined), activeIcon: Icon(Icons.group), label: 'FRIENDS'),
             const BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'PROFILE'),
           ],
         ),

@@ -20,8 +20,14 @@ You must follow these rules strictly, without exception:
 
 ### Metadata Rules
 9. Keep the metadata simple and direct.
-10. Do not infer brands or materials unless explicitly and clearly visible.
-11. Assign a stable temporary ID for every extracted item (e.g., "item_001", "item_002").
+10. For `formality`, use one of: "casual", "smart casual", "formal", "athletic", "loungewear".
+11. For `occasion`, give a short description like "daily wear", "party", "office", "gym".
+12. For `season`, use "summer", "winter", "fall", "spring", or "all-season".
+13. For `style_genres`, provide a list of string genres (e.g. ["streetwear", "casual"], ["prep", "smart casual"]).
+14. For `volume`, describe the physical fit/volume: "skinny", "slim", "regular", "relaxed", "baggy", "oversized".
+15. For `material`, identify obvious textures: "denim", "leather", "cotton", "wool", "knit", "silk", "technical".
+16. Do not infer brands or hidden features unless explicitly and clearly visible.
+17. Assign a stable temporary ID for every extracted item (e.g., "item_001", "item_002").
 
 ### Bounding Box Coordinates
 12. For every extracted person AND every extracted item, provide a bounding box that tightly encloses them.

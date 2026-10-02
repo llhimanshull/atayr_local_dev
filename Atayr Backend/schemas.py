@@ -16,7 +16,13 @@ class Item(BaseModel):
     secondary_color: Optional[str] = None
     pattern: str
     style: str
+    style_genres: Optional[List[str]] = None
+    formality: str
+    occasion: str
+    season: str
     fit: str
+    volume: Optional[str] = None
+    material: Optional[str] = None
     visibility: float
     bounding_box: BoundingBox
 

@@ -57,20 +57,77 @@ class WardrobeService {
 
     try {
       await _supabase.from('garments').insert(dataToInsert);
+      invalidateCache();
     } catch (e) {
       throw WardrobeException('Failed to insert garment record: $e');
     }
   }
 
-  Future<List<Map<String, dynamic>>> getGarments() async {
+  static List<Map<String, dynamic>>? _cachedGarments;
+  static DateTime? _cacheTimestamp;
+
+  bool get hasCachedGarments => _cachedGarments != null;
+
+  List<Map<String, dynamic>> getCachedGarments() {
+    return _cachedGarments ?? [];
+  }
+
+  void invalidateCache() {
+    _cachedGarments = null;
+    _cacheTimestamp = null;
+  }
+
+  Future<List<Map<String, dynamic>>> getGarments({int limit = 50, int offset = 0}) async {
+    final userId = currentUserId;
+    if (userId == null) throw WardrobeException('User not authenticated.');
+
     try {
       final response = await _supabase
           .from('garments')
-          .select()
+          .select('id, user_id, name, category, subcategory, primary_color, secondary_color, pattern, style, fit, studio_image_path, is_shared_with_friends, created_at')
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+          
+      final data = List<Map<String, dynamic>>.from(response);
+      
+      // Update cache if fetching the first page
+      if (offset == 0) {
+        _cachedGarments = data;
+        _cacheTimestamp = DateTime.now();
+      }
+      
+      return data;
+    } catch (e) {
+      throw WardrobeException('Failed to load garments: $e');
+    }
+  }
+
+  Future<int> getGarmentCount() async {
+    final userId = currentUserId;
+    if (userId == null) throw WardrobeException('User not authenticated.');
+
+    try {
+      final response = await _supabase
+          .from('garments')
+          .select('id')
+          .eq('user_id', userId);
+      return (response as List).length;
+    } catch (e) {
+      return 0; // Return 0 on error so it doesn't break UI
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getFriendGarments(String friendUserId) async {
+    try {
+      final response = await _supabase
+          .from('garments')
+          .select('id, user_id, name, category, subcategory, primary_color, secondary_color, pattern, style, fit, studio_image_path, is_shared_with_friends, created_at')
+          .eq('user_id', friendUserId)
           .order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      throw WardrobeException('Failed to load garments: $e');
+      throw WardrobeException('Failed to load friend garments: $e');
     }
   }
 
@@ -85,6 +142,17 @@ class WardrobeService {
     }
   }
 
+  Future<void> updateGarmentSharing(String id, bool isShared) async {
+    try {
+      await _supabase
+          .from('garments')
+          .update({'is_shared_with_friends': isShared})
+          .eq('id', id);
+    } catch (e) {
+      throw WardrobeException('Failed to update sharing status: $e');
+    }
+  }
+
   Future<void> deleteGarment(String id, String studioImagePath) async {
     try {
       // 1. Delete from database
@@ -92,6 +160,9 @@ class WardrobeService {
       
       // 2. Delete the image from storage to prevent orphaned files
       await _supabase.storage.from('wardrobe').remove([studioImagePath]);
+      
+      // Invalidate cache
+      invalidateCache();
     } catch (e) {
       throw WardrobeException('Failed to delete garment: $e');
     }
