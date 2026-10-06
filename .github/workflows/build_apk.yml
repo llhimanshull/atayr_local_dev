@@ -41,9 +41,9 @@ jobs:
         working-directory: './Atayr Frontend/atayr'
         run: flutter pub get
 
-      - name: Build APK
+      - name: Build APK (split per ABI)
         working-directory: './Atayr Frontend/atayr'
-        run: flutter build apk --release
+        run: flutter build apk --release --split-per-abi
 
       - name: Get current date
         id: date
@@ -53,10 +53,14 @@ jobs:
         id: commit
         run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Rename APK
+      - name: Rename APKs
         run: |
-          cp "./Atayr Frontend/atayr/build/app/outputs/flutter-apk/app-release.apk" \
-             "./Atayr-v1.0.0-${{ steps.commit.outputs.short_sha }}.apk"
+          cp "./Atayr Frontend/atayr/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" \
+             "./Atayr-arm64-${{ steps.commit.outputs.short_sha }}.apk"
+          cp "./Atayr Frontend/atayr/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk" \
+             "./Atayr-armeabi-${{ steps.commit.outputs.short_sha }}.apk"
+          cp "./Atayr Frontend/atayr/build/app/outputs/flutter-apk/app-x86_64-release.apk" \
+             "./Atayr-x86_64-${{ steps.commit.outputs.short_sha }}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -71,7 +75,14 @@ jobs:
             **Built at:** ${{ steps.date.outputs.date }} UTC
 
             ---
-            Download the APK below and install it on your Android device.
-          files: ./Atayr-v1.0.0-${{ steps.commit.outputs.short_sha }}.apk
+            **Which APK to download?**
+            - **arm64** — Most modern phones (Samsung, Pixel, OnePlus, Xiaomi, etc.)
+            - **armeabi** — Older phones
+            - **x86_64** — Emulators / Chromebooks
+          files: |
+            ./Atayr-arm64-${{ steps.commit.outputs.short_sha }}.apk
+            ./Atayr-armeabi-${{ steps.commit.outputs.short_sha }}.apk
+            ./Atayr-x86_64-${{ steps.commit.outputs.short_sha }}.apk
           draft: false
           prerelease: false
+
