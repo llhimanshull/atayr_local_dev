@@ -44,12 +44,13 @@ android {
             
             keyAlias = keystoreProperties["keyAlias"] as String
             keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
             storePassword = keystoreProperties["storePassword"] as String
 
-            if (!storeFile.exists()) {
-                throw GradleException("FATAL: Keystore file not found at ${storeFile.absolutePath}")
+            val keyFile = file(keystoreProperties["storeFile"] as String)
+            if (!keyFile.exists()) {
+                throw GradleException("FATAL: Keystore file not found at ${keyFile.absolutePath}")
             }
+            storeFile = keyFile
         }
     }
 
