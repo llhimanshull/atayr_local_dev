@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
+permissions:
+  contents: write # Required to create GitHub Releases
+
 jobs:
   build:
     name: Build APK
@@ -42,9 +45,33 @@ jobs:
         working-directory: './Atayr Frontend/atayr'
         run: flutter build apk --release
 
-      - name: Upload APK as Artifact
-        uses: actions/upload-artifact@v4
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d_%H-%M')" >> $GITHUB_OUTPUT
+
+      - name: Get short commit hash
+        id: commit
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Rename APK
+        run: |
+          cp "./Atayr Frontend/atayr/build/app/outputs/flutter-apk/app-release.apk" \
+             "./Atayr-v1.0.0-${{ steps.commit.outputs.short_sha }}.apk"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Atayr-Release-APK
-          path: './Atayr Frontend/atayr/build/app/outputs/flutter-apk/app-release.apk'
-          retention-days: 90
+          tag_name: build-${{ steps.date.outputs.date }}
+          name: "Atayr Build — ${{ steps.date.outputs.date }}"
+          body: |
+            ### 📱 Atayr APK — Auto Build
+
+            **Commit:** `${{ github.sha }}`
+            **Branch:** `${{ github.ref_name }}`
+            **Built at:** ${{ steps.date.outputs.date }} UTC
+
+            ---
+            Download the APK below and install it on your Android device.
+          files: ./Atayr-v1.0.0-${{ steps.commit.outputs.short_sha }}.apk
+          draft: false
+          prerelease: false
