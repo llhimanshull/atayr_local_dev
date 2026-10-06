@@ -51,6 +51,9 @@ android {
                 throw GradleException("FATAL: Keystore file not found at ${keyFile.absolutePath}")
             }
             storeFile = keyFile
+            
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
