@@ -57,6 +57,19 @@ class SupabaseJobService:
         print(f"[EMBEDDING WRITE] garment_id={garment_data.get('id')} embedding_present={bool(embedding)} dims={len(embedding) if embedding else 0}")
         return self.supabase.table("garments").insert(garment_data).execute()
 
+    def insert_garment_if_under_limit(self, garment_data: dict) -> dict:
+        """
+        Attempts to insert a garment atomically, failing if the wardrobe has >= 30 items.
+        """
+        embedding = garment_data.get('embedding')
+        print(f"[EMBEDDING WRITE LIMIT-CHECK] garment_id={garment_data.get('id')} embedding_present={bool(embedding)}")
+        
+        response = self.supabase.rpc(
+            "insert_garment_if_under_limit",
+            {"garment_data": garment_data}
+        ).execute()
+        return response.data
+
     def insert_garment_observation(self, observation_data: dict):
         embedding = observation_data.get('embedding')
         print(f"[EMBEDDING WRITE] garment_id={observation_data.get('garment_id')} embedding_present={bool(embedding)} dims={len(embedding) if embedding else 0}")

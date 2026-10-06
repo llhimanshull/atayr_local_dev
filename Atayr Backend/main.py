@@ -18,6 +18,7 @@ import json
 import asyncio
 import base64
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends, Header
@@ -46,6 +47,9 @@ if not os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_CLOUD_PROJECT"):
 STATIC_DIR = Path("static")
 STATIC_DIR.mkdir(exist_ok=True)
 
+ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "true").lower() == "true"
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost,http://127.0.0.1").split(",")
+
 # FastAPI app
 app = FastAPI(
     title="Atayr Ghost Mannequin Generator - Analysis API",
@@ -54,11 +58,65 @@ app = FastAPI(
         "Get structured metadata of visible garments."
     ),
     version="0.2.0",
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
+)
+
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in ALLOWED_ORIGINS if origin.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+
+from services.supabase_job_service import SupabaseJobService
+supabase_job_service = SupabaseJobService()
+
+async def get_authenticated_user(authorization: Optional[str] = Header(None)):
+    """Validate Supabase JWT and return user_id."""
+    if not authorization or not authorization.startswith("Bearer "):
+        print(f"JWT Verification Failed: Missing or malformed token (Authorization header: {authorization})")
+        raise HTTPException(status_code=401, detail="Missing or malformed token")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    try:
+        user_resp = supabase_job_service.supabase.auth.get_user(token)
+        if not user_resp or not user_resp.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_resp.user.id
+    except Exception as e:
+        print(f">>>> AUTH ERROR: Supabase Auth Verification Failed - {type(e).__name__}: {e}")
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+class RateLimiter:
+    def __init__(self, max_requests: int, window_seconds: int, name: str):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.name = name
+
+    def __call__(self, user_id: str = Depends(get_authenticated_user)):
+        from services.cache_service import CacheService
+        key = f"rate_limit:{self.name}:{user_id}"
+        current = CacheService.get(key)
+        if current is None:
+            CacheService.set(key, 1, ttl=self.window_seconds)
+        elif current >= self.max_requests:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
+        else:
+            CacheService.set(key, current + 1, ttl=self.window_seconds)
+        return user_id
+
+# Rate limiters for different endpoints
+process_job_limiter = RateLimiter(max_requests=60, window_seconds=60, name="process_job")
+ai_limiter = RateLimiter(max_requests=10, window_seconds=60, name="ai_endpoint")
 
 
 @app.get("/")
@@ -73,6 +131,12 @@ def root():
     }
 
 
+@app.get("/health")
+def health_check():
+    """Lightweight health check endpoint for UptimeRobot."""
+    return {"status": "ok"}
+
+
 @app.get("/test", response_class=HTMLResponse)
 def test_ui():
     """Serve the test UI."""
@@ -82,6 +146,7 @@ def test_ui():
 @app.post("/analyze-only")
 async def analyze_only(
     image: UploadFile = File(..., description="Photo of a person wearing an outfit"),
+    user_id: str = Depends(ai_limiter)
 ):
     """
     Run ONLY the analysis step to extract visible items.
@@ -116,7 +181,8 @@ async def analyze_only(
 @app.post("/generate")
 async def generate(
     image: UploadFile = File(..., description="Photo of a person wearing an outfit"),
-    analysis_result: str = Form(..., description="JSON string of the complete analysis result containing the items array")
+    analysis_result: str = Form(..., description="JSON string of the complete analysis result containing the items array"),
+    user_id: str = Depends(ai_limiter)
 ):
     """
     Generate standalone studio images for every item in the analysis result concurrently.
@@ -128,6 +194,9 @@ async def generate(
         )
 
     image_bytes = await image.read()
+    
+    if len(image_bytes) > 20 * 1024 * 1024:  # 20MB limit
+        raise HTTPException(status_code=400, detail="Image too large (max 20MB)")
 
     try:
         analysis_dict = json.loads(analysis_result)
@@ -190,7 +259,6 @@ async def generate(
 # ==============================================================================
 
 from fastapi import BackgroundTasks
-from services.supabase_job_service import SupabaseJobService
 from services.analyzer import embed_garment
 from services.suggestion_service import generate_suggestion
 import asyncio
@@ -220,8 +288,6 @@ def cosine_distance(v1, v2):
     mag2 = sum(b*b for b in v2) ** 0.5
     if mag1 * mag2 == 0: return 1.0
     return 1.0 - (dot / (mag1 * mag2))
-
-supabase_job_service = SupabaseJobService()
 
 async def process_job_background(job_id: str):
     """
@@ -265,7 +331,15 @@ async def process_job_background(job_id: str):
                 continue
             
             try:
+                # File size limit before processing
+                file_metadata = supabase_job_service.supabase.storage.from_("wardrobe").get_public_url(source_path) # Just as a URL placeholder for size checking if possible, but actually we have to download.
                 image_data = supabase_job_service.supabase.storage.from_("wardrobe").download(source_path)
+                
+                if len(image_data) > 20 * 1024 * 1024:  # 20MB limit
+                    supabase_job_service.update_job_item_status(item_id, "failed", error_message="Image too large (max 20MB)")
+                    failed_count += 1
+                    continue
+                    
                 supabase_job_service.update_job_item_status(item_id, "analyzing", progress=0.3)
                 
                 outfit_json = analyze_outfit(image_data, "image/jpeg")
@@ -312,6 +386,7 @@ async def process_job_background(job_id: str):
         # Group garments by item_id to update item status properly
         item_progress = {g["item_id"]: 0 for g in garments_to_process}
         failed_item_ids = set()
+        limit_hit_item_ids = set()
         
         for g in garments_to_process:
             item_id = g["item_id"]
@@ -490,7 +565,12 @@ async def process_job_background(job_id: str):
                     'source_image_path': source_path,
                     'embedding': embedding, # keeping on garment table too for legacy support
                 }
-                supabase_job_service.insert_garment(db_row)
+                insert_result = supabase_job_service.insert_garment_if_under_limit(db_row)
+                
+                if not insert_result.get("success"):
+                    print(f"Skipping insertion for {garment_uuid}: Wardrobe limit reached.")
+                    limit_hit_item_ids.add(item_id)
+                    continue
                 
                 # Insert observation
                 obs_uuid = str(uuid.uuid4())
@@ -519,7 +599,12 @@ async def process_job_background(job_id: str):
         # Mark all fully processed items as completed
         processed_item_ids = set([g["item_id"] for g in garments_to_process])
         for item_id in processed_item_ids:
-            if item_id not in failed_item_ids:
+            if item_id in failed_item_ids:
+                continue
+            elif item_id in limit_hit_item_ids:
+                supabase_job_service.update_job_item_status(item_id, "completed", error_message="Your free wardrobe is full (30 items).", progress=1.0)
+                completed_count += 1
+            else:
                 supabase_job_service.update_job_item_status(item_id, "completed", progress=1.0)
                 completed_count += 1
 
@@ -791,28 +876,13 @@ async def resume_job_item_background(item_id: str, person_id: str):
         supabase_job_service.update_job_item_status(item_id, "failed", error_message=str(e))
 
 
-async def get_authenticated_user(authorization: str = Header(...)):
-    """Validate Supabase JWT and return user_id."""
-    token = authorization.replace("Bearer ", "")
-    try:
-        payload = jwt.decode(
-            token,
-            options={"verify_signature": False},  # Supabase tokens are validated by structure
-            algorithms=["HS256"]
-        )
-        # For Supabase, the 'sub' claim is the user ID
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return user_id
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+
 
 @app.post("/process-job/{job_id}")
 async def process_job(
     job_id: str, 
     background_tasks: BackgroundTasks,
-    user_id: str = Depends(get_authenticated_user)
+    user_id: str = Depends(process_job_limiter)
 ):
     """
     Trigger the backend to start processing an asynchronous job.
@@ -822,6 +892,18 @@ async def process_job(
     if not job or job.get("user_id") != user_id:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
+    if job.get("status") in ["processing", "completed", "failed", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Job has already been processed or is currently processing")
+
+    items = supabase_job_service.get_job_items(job_id)
+    MAX_PHOTOS = int(os.getenv("MAX_PHOTOS_PER_BATCH", "10"))
+    if items and len(items) > MAX_PHOTOS:
+        supabase_job_service.update_job_status(job_id, "failed")
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_PHOTOS} photos per batch allowed.")
+
+    # Mark as processing synchronously to avoid concurrent triggers bypassing the check
+    supabase_job_service.update_job_status(job_id, "processing")
+
     background_tasks.add_task(process_job_background, job_id)
     return {"status": "accepted", "job_id": job_id, "message": "Job is processing in the background."}
 
@@ -829,12 +911,15 @@ async def process_job(
 async def generate_suggestion_endpoint(
     image: UploadFile = File(..., description="Photo of a person wearing an outfit"),
     item_json: str = Form(..., description="JSON string of the selected garment"),
-    user_id: str = Depends(get_authenticated_user)
+    user_id: str = Depends(ai_limiter)
 ):
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported image type")
 
     image_bytes = await image.read()
+    if len(image_bytes) > 20 * 1024 * 1024:  # 20MB limit
+        raise HTTPException(status_code=400, detail="Image too large (max 20MB)")
+        
     try:
         item = json.loads(item_json)
     except Exception:
@@ -852,7 +937,7 @@ async def resume_job_item(
     item_id: str, 
     person_id: str, 
     background_tasks: BackgroundTasks,
-    user_id: str = Depends(get_authenticated_user)
+    user_id: str = Depends(process_job_limiter)
 ):
     """
     Resumes processing for a job item that was paused for person selection.

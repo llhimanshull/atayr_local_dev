@@ -210,7 +210,9 @@ class _PendingRequestsTabState extends State<_PendingRequestsTab> {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: NeoCard(
-            child: ListTile(
+            child: Material(
+              color: Colors.transparent,
+              child: ListTile(
               title: Text('User: ${req.userAId.substring(0, 8)}...'),
               subtitle: Text('Sent: ${req.createdAt.toLocal().toString().split('.')[0]}'),
               trailing: Row(
@@ -226,6 +228,7 @@ class _PendingRequestsTabState extends State<_PendingRequestsTab> {
                   ),
                 ],
               ),
+            ),
             ),
           ),
         );
@@ -293,7 +296,9 @@ class _MyFriendsTabState extends State<_MyFriendsTab> {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: NeoCard(
-            child: ListTile(
+            child: Material(
+              color: Colors.transparent,
+              child: ListTile(
               leading: const CircleAvatar(backgroundColor: AtayrColors.accent, child: Icon(Icons.person, color: AtayrColors.ink)),
               title: Text(f.displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text('${f.sharedItemCount} items • Since: ${f.friendsSince.toLocal().toString().split(' ')[0]}'),
@@ -307,6 +312,7 @@ class _MyFriendsTabState extends State<_MyFriendsTab> {
                   MaterialPageRoute(builder: (context) => FriendWardrobeScreen(friend: f)),
                 );
               },
+            ),
             ),
           ),
         );

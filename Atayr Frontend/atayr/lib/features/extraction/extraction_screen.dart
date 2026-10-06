@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/theme/atayr_colors.dart';
 import '../../core/widgets/neo_button.dart';
@@ -24,9 +25,29 @@ class _ExtractionScreenState extends State<ExtractionScreen> {
   Future<void> _pickImages() async {
     final List<XFile> images = await _picker.pickMultiImage();
     if (images.isNotEmpty) {
-      setState(() {
-        _selectedImages.addAll(images);
-      });
+      final int maxPhotos = int.tryParse(dotenv.env['MAX_PHOTOS_PER_BATCH'] ?? '10') ?? 10;
+      
+      if (_selectedImages.length + images.length > maxPhotos) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('MAXIMUM $maxPhotos PHOTOS PER BATCH ALLOWED.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        
+        final int remaining = maxPhotos - _selectedImages.length;
+        if (remaining > 0) {
+          setState(() {
+            _selectedImages.addAll(images.take(remaining));
+          });
+        }
+      } else {
+        setState(() {
+          _selectedImages.addAll(images);
+        });
+      }
     }
   }
 

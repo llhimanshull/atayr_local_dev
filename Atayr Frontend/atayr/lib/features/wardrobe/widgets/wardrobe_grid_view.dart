@@ -103,6 +103,12 @@ class _WardrobeGridViewState extends State<WardrobeGridView> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               NeoSectionHeader(title: widget.title),
+              const SizedBox(height: 8),
+              if (!widget.readOnly)
+                Text(
+                  '${widget.garments.length} / 30 WARDROBE ITEMS',
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12),
+                ),
               const SizedBox(height: 16),
               NeoInput(
                 controller: _searchController,

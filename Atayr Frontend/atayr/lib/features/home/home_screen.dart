@@ -34,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _totalWardrobeCount = 0;
   String? _displayName;
   int _activeBorrowRequests = 0; // Mocked for now
+  int _todaySuggestionCount = 0;
   bool _isLoading = true;
 
   @override
@@ -57,6 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final count = await _wardrobeService.getGarmentCount();
       final name = await _profileService.getDisplayName();
       
+      final todayStr = DateTime.now().toUtc().toIso8601String().substring(0, 10);
+      final int todayCount = suggestions.where((s) => s['created_at'].toString().startsWith(todayStr)).length;
+      
       if (mounted) {
         setState(() {
           _recentGarments = garments.take(4).toList();
@@ -64,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _recentSuggestions = suggestions.take(3).toList();
           _totalWardrobeCount = count;
           _displayName = name;
+          _todaySuggestionCount = todayCount;
           _activeBorrowRequests = 0; // Hide borrow requests
           _isLoading = false;
         });
@@ -182,8 +187,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       const NeoSectionHeader(title: 'RECENT SCANS'),
                       if (!_isLoading)
                         Text(
-                          '$_totalWardrobeCount ITEMS TOTAL',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          '$_totalWardrobeCount / 30 WARDROBE ITEMS',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12),
                         ),
                     ],
                   ),
@@ -258,8 +263,30 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
 
                   // 6. Promotion banner
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const NeoSectionHeader(title: 'AI SUGGESTIONS'),
+                      if (!_isLoading)
+                        Text(
+                          '$_todaySuggestionCount / 2 TODAY',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
                   GestureDetector(
                     onTap: () {
+                      if (_todaySuggestionCount >= 2) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('YOU HAVE USED YOUR FREE DAILY ALLOWANCE OF 2 SUGGESTIONS. PLEASE TRY AGAIN TOMORROW.'),
+                            backgroundColor: Colors.red,
+                            duration: Duration(seconds: 4),
+                          ),
+                        );
+                        return;
+                      }
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (context) => const SuggestionScanScreen()),

@@ -127,7 +127,9 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                                 )
                               ],
                             ),
-                            child: ListTile(
+                            child: Material(
+                              color: Colors.transparent,
+                              child: ListTile(
                               contentPadding: const EdgeInsets.all(16),
                               title: Text(
                                 'JOB: ${job.id.substring(0, 8).toUpperCase()}',
@@ -158,6 +160,7 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                               onTap: () {
                                 _showJobItems(job.id);
                               },
+                            ),
                             ),
                           );
                         },
@@ -211,7 +214,9 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                             side: const BorderSide(color: AtayrColors.ink, width: 1),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: ListTile(
+                          child: Material(
+                            color: Colors.transparent,
+                            child: ListTile(
                             leading: _buildStatusIcon(item.status),
                             title: Text('ITEM ${index + 1} - ${item.status.toUpperCase()}'),
                             subtitle: isSkipped
@@ -240,6 +245,7 @@ class _JobsStatusScreenState extends State<JobsStatusScreen> {
                                     ],
                                   )
                                 : Text('Progress: ${(item.progress * 100).toInt()}%'),
+                            ),
                           ),
                         );
                       },
