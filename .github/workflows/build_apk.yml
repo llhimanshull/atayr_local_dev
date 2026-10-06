@@ -37,6 +37,15 @@ jobs:
         run: |
           echo "${{ secrets.FLUTTER_ENV }}" > .env
 
+      - name: Setup Keystore
+        working-directory: './Atayr Frontend/atayr/android'
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/upload-keystore.jks
+          echo "storePassword=${{ secrets.KEY_PASSWORD }}" > key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> key.properties
+          echo "storeFile=upload-keystore.jks" >> key.properties
+
       - name: Install Dependencies
         working-directory: './Atayr Frontend/atayr'
         run: flutter pub get
