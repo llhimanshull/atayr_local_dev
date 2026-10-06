@@ -19,14 +19,15 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17' # Flutter Android builds require Java 17
+          java-version: '17'
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.29.x' # Uses latest stable Flutter version
-          channel: 'stable'
-          cache: true
+      - name: Install Flutter
+        run: |
+          git clone https://github.com/flutter/flutter.git -b stable --depth 1 "$HOME/flutter"
+          echo "$HOME/flutter/bin" >> $GITHUB_PATH
+
+      - name: Verify Flutter Version
+        run: flutter --version
 
       - name: Create .env file
         working-directory: './Atayr Frontend/atayr'
