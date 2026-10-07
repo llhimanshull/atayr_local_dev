@@ -2,13 +2,13 @@ import traceback
 from rembg import remove, new_session
 
 # Initialize the model session once globally
-# Using 'u2net' which is highly accurate and preserves edges well.
+# Using 'u2netp' which is the lightweight version of u2net (only 4.7MB vs 176MB), perfect for keeping RAM under 512MB
 _session = None
 
 def _get_session():
     global _session
     if _session is None:
-        _session = new_session("u2net")
+        _session = new_session("u2netp")
     return _session
 
 def remove_background(image_bytes: bytes) -> tuple[bytes, str]:
