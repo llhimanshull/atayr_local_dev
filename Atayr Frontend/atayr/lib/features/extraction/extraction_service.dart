@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -33,14 +34,52 @@ class ExtractionService {
     return MediaType('image', 'jpeg');
   }
 
+  Future<String> _getAuthToken() async {
+    var session = _supabase.auth.currentSession;
+    if (session == null) {
+      throw ExtractionException('User is not authenticated');
+    }
+    if (session.isExpired) {
+      try {
+        final res = await _supabase.auth.refreshSession();
+        if (res.session != null) {
+          session = res.session;
+        }
+      } catch (_) {
+        // Ignore and let backend handle 401 if refresh fails
+      }
+    }
+    return session!.accessToken;
+  }
+
+  void _handleHttpError(int statusCode, String responseData, String operation) {
+    String errorType = 'Unknown error';
+    if (statusCode == 401) {
+      errorType = 'Authentication/session problem (401)';
+    } else if (statusCode == 403) {
+      errorType = 'Permission problem (403)';
+    } else if (statusCode == 404) {
+      errorType = 'Endpoint/configuration problem (404)';
+    } else if (statusCode == 408) {
+      errorType = 'Request timed out (408)';
+    } else if (statusCode >= 500 && statusCode < 600) {
+      errorType = 'Backend/server failure ($statusCode)';
+    } else {
+      errorType = 'Request failed with status: $statusCode';
+    }
+    throw ExtractionException('$operation failed: $errorType');
+  }
+
   // ============================================================
   // EXISTING SINGLE-IMAGE FLOW (preserved from Step 7)
   // ============================================================
 
   Future<AnalysisResponse> analyzeImage(XFile image) async {
     final uri = Uri.parse('$baseUrl/analyze-only');
+    final token = await _getAuthToken();
     
     var request = http.MultipartRequest('POST', uri);
+    request.headers['Authorization'] = 'Bearer $token';
     request.files.add(await http.MultipartFile.fromPath(
       'image', 
       image.path,
@@ -48,25 +87,28 @@ class ExtractionService {
     ));
 
     try {
-      final response = await request.send().timeout(const Duration(seconds: 30));
+      final response = await request.send().timeout(const Duration(seconds: 300));
       final responseData = await response.stream.bytesToString();
       
       if (response.statusCode != 200) {
-        throw ExtractionException('Analysis failed: ${response.statusCode} - $responseData');
+        _handleHttpError(response.statusCode, responseData, 'Analysis');
       }
 
       final jsonMap = jsonDecode(responseData);
       return AnalysisResponse.fromJson(jsonMap);
     } catch (e) {
       if (e is ExtractionException) rethrow;
+      if (e is TimeoutException) throw ExtractionException('Analysis timed out');
       throw ExtractionException('Network error during analysis: $e');
     }
   }
 
   Future<GenerationResponse> generateGarments(XFile image, AnalysisResponse analysisResult) async {
     final uri = Uri.parse('$baseUrl/generate');
+    final token = await _getAuthToken();
     
     var request = http.MultipartRequest('POST', uri);
+    request.headers['Authorization'] = 'Bearer $token';
     request.files.add(await http.MultipartFile.fromPath(
       'image', 
       image.path,
@@ -88,17 +130,18 @@ class ExtractionService {
 
     GenerationResponse rawResponse;
     try {
-      final response = await request.send().timeout(const Duration(minutes: 5));
+      final response = await request.send().timeout(const Duration(seconds: 300));
       final responseData = await response.stream.bytesToString();
       
       if (response.statusCode != 200) {
-        throw ExtractionException('Generation failed: ${response.statusCode} - $responseData');
+        _handleHttpError(response.statusCode, responseData, 'Generation');
       }
 
       final jsonMap = jsonDecode(responseData);
       rawResponse = GenerationResponse.fromJson(jsonMap);
     } catch (e) {
       if (e is ExtractionException) rethrow;
+      if (e is TimeoutException) throw ExtractionException('Generation timed out');
       throw ExtractionException('Network error during generation: $e');
     }
 
@@ -361,9 +404,9 @@ class ExtractionService {
     // 4. Trigger backend background processing
     final uri = Uri.parse('$baseUrl/process-job/$jobId');
     try {
-      final token = _supabase.auth.currentSession?.accessToken;
-      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
-      final response = await http.post(uri, headers: headers).timeout(const Duration(seconds: 10));
+      final token = await _getAuthToken();
+      final headers = {'Authorization': 'Bearer $token'};
+      final response = await http.post(uri, headers: headers).timeout(const Duration(seconds: 300));
       if (response.statusCode != 200 && response.statusCode != 202) {
         // print('Warning: Backend returned ${response.statusCode} for process-job');
       }
@@ -382,14 +425,15 @@ class ExtractionService {
   Future<void> resumeJobItem(String itemId, String personId) async {
     final uri = Uri.parse('$baseUrl/process-job-item/$itemId/resume?person_id=$personId');
     try {
-      final token = _supabase.auth.currentSession?.accessToken;
-      final headers = token != null ? {'Authorization': 'Bearer $token'} : null;
-      final response = await http.post(uri, headers: headers).timeout(const Duration(seconds: 10));
+      final token = await _getAuthToken();
+      final headers = {'Authorization': 'Bearer $token'};
+      final response = await http.post(uri, headers: headers).timeout(const Duration(seconds: 300));
       if (response.statusCode != 200 && response.statusCode != 202) {
-        throw ExtractionException('Failed to resume item: ${response.statusCode}');
+        _handleHttpError(response.statusCode, '', 'Resume item');
       }
     } catch (e) {
       if (e is ExtractionException) rethrow;
+      if (e is TimeoutException) throw ExtractionException('Resume item timed out');
       throw ExtractionException('Network error during resume: $e');
     }
   }

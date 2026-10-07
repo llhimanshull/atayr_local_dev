@@ -14,5 +14,5 @@ class AppConfig {
 
   static String get supabaseUrl => _isInitialized ? (dotenv.env['SUPABASE_URL'] ?? 'https://placeholder.supabase.co') : 'https://placeholder.supabase.co';
   static String get supabaseAnonKey => _isInitialized ? (dotenv.env['SUPABASE_ANON_KEY'] ?? 'placeholder-key') : 'placeholder-key';
-  static String get apiBaseUrl => _isInitialized ? (dotenv.env['API_BASE_URL'] ?? 'http://localhost:8000') : 'http://localhost:8000';
+  static String get apiBaseUrl => _isInitialized ? (dotenv.env['API_BASE_URL'] ?? 'https://atayr-backend-174531985559.asia-south1.run.app') : 'https://atayr-backend-174531985559.asia-south1.run.app';
 }
